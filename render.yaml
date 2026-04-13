@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: feishu-hermes-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 2 -b 0.0.0.0:$PORT src.app:app
+    envVars:
+      - key: APP_ID
+        value: cli_a956dc22b7f81bc4
+      - key: APP_SECRET
+        value: qBHtLBPtvkBUmSYXjMKIegpbPjgMcHY1
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    healthCheckPath: /health
