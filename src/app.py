@@ -134,7 +134,7 @@ def call_kimi_api(messages):
             "Authorization": f"Bearer {KIMI_API_KEY}"
         }
         payload = {
-            "model": "kimi-k2.5",
+            "model": "moonshot-v1-8k",  # 修正模型名称
             "messages": messages,
             "temperature": 0.7,
             "max_tokens": 2000
@@ -143,11 +143,14 @@ def call_kimi_api(messages):
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         data = response.json()
         
+        print(f"[Kimi API] Status: {response.status_code}, Response: {data}")
+        
         if response.status_code == 200 and "choices" in data:
             return data["choices"][0]["message"]["content"]
         else:
-            print(f"Kimi API错误: {data}")
-            return "😢 调用AI服务出错，请稍后重试"
+            error_msg = data.get("error", {}).get("message", str(data))
+            print(f"[Kimi API 错误] {error_msg}")
+            return f"😢 调用AI服务出错: {error_msg}"
     except Exception as e:
         print(f"调用Kimi API失败: {e}")
         return "😢 服务暂时不可用，请稍后重试"
