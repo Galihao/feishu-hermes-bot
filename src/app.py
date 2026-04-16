@@ -511,8 +511,18 @@ https://github.com/BuilderPulse/BuilderPulse
 
 def generate_builderpulse_daily():
     """生成BuilderPulse每日报告"""
-    content = get_builderpulse_report()
-    return format_builderpulse_report(content)
+    try:
+        print("[调试] 开始获取BuilderPulse报告...")
+        content = get_builderpulse_report()
+        print(f"[调试] 获取到内容: {content is not None}")
+        result = format_builderpulse_report(content)
+        print(f"[调试] 格式化完成, 结果长度: {len(result)}")
+        return result
+    except Exception as e:
+        print(f"[错误] generate_builderpulse_daily 失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"❌ 获取报告失败: {str(e)}"
 
 @app.route('/cron/daily-builderpulse', methods=['POST', 'GET'])
 def cron_daily_builderpulse():
@@ -606,12 +616,24 @@ def feishu_webhook():
             
             # 处理手动触发BuilderPulse日报命令
             if text.strip() in ["/builderpulse", "/日报", "市场报告", "洞察报告"]:
-                report = generate_builderpulse_daily()
-                if chat_type == "group":
-                    feishu_api.send_message(chat_id, report, receive_id_type="chat_id")
-                else:
-                    feishu_api.send_message(user_id, report)
-                return jsonify({"status": "ok"})
+                try:
+                    print(f"[调试] 收到命令: {text}, 用户: {user_id}")
+                    report = generate_builderpulse_daily()
+                    print(f"[调试] 报告生成完毕，发送中...")
+                    if chat_type == "group":
+                        feishu_api.send_message(chat_id, report, receive_id_type="chat_id")
+                    else:
+                        feishu_api.send_message(user_id, report)
+                    print("[调试] 报告发送成功")
+                    return jsonify({"status": "ok"})
+                except Exception as e:
+                    print(f"[错误] 处理BuilderPulse命令失败: {e}")
+                    error_msg = f"❌ 处理失败: {str(e)}"
+                    if chat_type == "group":
+                        feishu_api.send_message(chat_id, error_msg, receive_id_type="chat_id")
+                    else:
+                        feishu_api.send_message(user_id, error_msg)
+                    return jsonify({"status": "error", "message": str(e)}), 500
             
             # 处理消息
             reply = process_with_agent(user_id, text, chat_type)
