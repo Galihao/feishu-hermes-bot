@@ -175,12 +175,14 @@ def process_with_agent(user_id, message_text, chat_type="private"):
 • `/help` 或 `/帮助` - 显示此帮助
 • `/clear` 或 `/重置` - 清除对话历史，重新开始
 • `/github` 或 `热门项目` - 查看今日GitHub热门
+• `/builderpulse` 或 `/日报` - 查看今日市场洞察报告
 
 **功能说明：**
 • 支持多轮对话，AI会记住上下文
 • 支持群聊@我和私聊
-• 基于 Kimi AI 模型（kimi-k2.5）
+• 基于 Kimi AI 模型（moonshot-v1-8k）
 • 每日早晨9点自动推送GitHub热门项目
+• 每日早晨9点自动推送BuilderPulse市场报告
 
 **提示：**
 • 对话历史1小时后自动清除
@@ -420,9 +422,126 @@ def cron_daily_github():
             
     except Exception as e:
         print(f"执行定时任务出错: {e}")
+    return message
+
+# ============ BuilderPulse 每日报告推送 ============
+def get_builderpulse_report():
+    """获取BuilderPulse最新每日报告"""
+    try:
+        # 获取今天的日期
+        today = datetime.now().strftime("%Y-%m-%d")
+        year = datetime.now().strftime("%Y")
+        
+        # BuilderPulse GitHub 原始文件地址
+        url = f"https://raw.githubusercontent.com/BuilderPulse/BuilderPulse/main/zh/{year}/{today}.md"
+        
+        response = requests.get(url, timeout=30)
+        
+        if response.status_code == 200:
+            return response.text
+        else:
+            # 如果今天的还没有，尝试获取昨天的
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            url = f"https://raw.githubusercontent.com/BuilderPulse/BuilderPulse/main/zh/{year}/{yesterday}.md"
+            response = requests.get(url, timeout=30)
+            
+            if response.status_code == 200:
+                return response.text
+            else:
+                return None
+    except Exception as e:
+        print(f"获取BuilderPulse报告失败: {e}")
+        return None
+
+def format_builderpulse_report(markdown_content):
+    """格式化BuilderPulse报告为飞书消息"""
+    if not markdown_content:
+        return "❌ 暂无报告，请稍后重试"
+    
+    # 提取标题和主要内容
+    lines = markdown_content.split('\n')
+    
+    # 查找今日标题和核心建议
+    title = ""
+    insight = ""
+    reading_link = ""
+    
+    for i, line in enumerate(lines):
+        if line.startswith('# ') and not title:
+            title = line.replace('# ', '').strip()
+        elif line.startswith('💡') and not insight:
+            insight = line.strip()
+        elif '阅读今日报告' in line or '完整报告' in line:
+            # 提取链接
+            if 'github.com' in line:
+                reading_link = line.split('(')[1].split(')')[0] if '(' in line else ""
+    
+    today = datetime.now().strftime("%Y年%m月%d日")
+    
+    # 构建消息
+    message = f"""📋 **BuilderPulse 每日报告** ({today})
+
+**{title}**
+
+{insight}
+
+"""
+    
+    # 添加关键要点（提取前5个要点）
+    message += "📌 **今日要点**:\n"
+    count = 0
+    for line in lines:
+        if line.strip().startswith('- ') or line.strip().startswith('* '):
+            message += f"• {line.strip()[2:]}\n"
+            count += 1
+            if count >= 5:
+                break
+    
+    message += f"""
+📖 **阅读完整报告**:
+https://github.com/BuilderPulse/BuilderPulse
+
+⭐ **功能**
+• 每日9点自动推送市场洞察
+• 发送 `/builderpulse` 或 `/日报` 随时查看
+• 数据来源: Hacker News, GitHub, Product Hunt, Reddit等
+"""
+    
+    return message
+
+def generate_builderpulse_daily():
+    """生成BuilderPulse每日报告"""
+    content = get_builderpulse_report()
+    return format_builderpulse_report(content)
+
+@app.route('/cron/daily-builderpulse', methods=['POST', 'GET'])
+def cron_daily_builderpulse():
+    """定时任务：每日推送BuilderPulse报告"""
+    print(f"[{datetime.now()}] 执行每日BuilderPulse推送任务")
+    
+    if not TARGET_USER_ID:
+        print("错误: 未设置 TARGET_USER_ID 环境变量")
+        return jsonify({"status": "error", "message": "TARGET_USER_ID not set"}), 400
+    
+    try:
+        # 生成报告
+        report = generate_builderpulse_daily()
+        
+        # 发送给目标用户
+        result = feishu_api.send_message(TARGET_USER_ID, report)
+        
+        if result.get("code") == 0:
+            print(f"成功推送BuilderPulse日报给用户: {TARGET_USER_ID}")
+            return jsonify({"status": "success", "message": "BuilderPulse report sent"})
+        else:
+            print(f"推送失败: {result}")
+            return jsonify({"status": "error", "message": result}), 500
+            
+    except Exception as e:
+        print(f"执行定时任务出错: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
-# 添加手动触发命令支持
+# ============ 飞书Webhook处理 ============
 @app.route('/webhook/feishu', methods=['POST'])
 def feishu_webhook():
     """处理飞书事件回调"""
@@ -479,6 +598,15 @@ def feishu_webhook():
             # 处理手动触发GitHub日报命令
             if text.strip() in ["/github", "/今日热门", "热门项目"]:
                 report = generate_daily_report()
+                if chat_type == "group":
+                    feishu_api.send_message(chat_id, report, receive_id_type="chat_id")
+                else:
+                    feishu_api.send_message(user_id, report)
+                return jsonify({"status": "ok"})
+            
+            # 处理手动触发BuilderPulse日报命令
+            if text.strip() in ["/builderpulse", "/日报", "市场报告", "洞察报告"]:
+                report = generate_builderpulse_daily()
                 if chat_type == "group":
                     feishu_api.send_message(chat_id, report, receive_id_type="chat_id")
                 else:
