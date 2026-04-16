@@ -422,7 +422,7 @@ def cron_daily_github():
             
     except Exception as e:
         print(f"执行定时任务出错: {e}")
-    return message
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # ============ BuilderPulse 每日报告推送 ============
 def get_builderpulse_report():
