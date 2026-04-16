@@ -551,6 +551,55 @@ def cron_daily_builderpulse():
         print(f"执行定时任务出错: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# ============ 合并每日推送（GitHub + BuilderPulse）===========
+@app.route('/cron/daily-all', methods=['POST', 'GET'])
+def cron_daily_all():
+    """定时任务：每日合并推送所有报告"""
+    print(f"[{datetime.now()}] 执行每日合并推送任务")
+    
+    if not TARGET_USER_ID:
+        print("错误: 未设置 TARGET_USER_ID 环境变量")
+        return jsonify({"status": "error", "message": "TARGET_USER_ID not set"}), 400
+    
+    results = []
+    
+    try:
+        # 1. 推送 GitHub 热门项目
+        print("正在生成 GitHub 报告...")
+        github_report = generate_daily_report()
+        github_result = feishu_api.send_message(TARGET_USER_ID, github_report)
+        
+        if github_result.get("code") == 0:
+            print("✅ GitHub 报告推送成功")
+            results.append("GitHub: 成功")
+        else:
+            print(f"❌ GitHub 报告推送失败: {github_result}")
+            results.append(f"GitHub: 失败 - {github_result}")
+        
+        # 2. 推送 BuilderPulse 日报
+        print("正在生成 BuilderPulse 报告...")
+        builderpulse_report = generate_builderpulse_daily()
+        builderpulse_result = feishu_api.send_message(TARGET_USER_ID, builderpulse_report)
+        
+        if builderpulse_result.get("code") == 0:
+            print("✅ BuilderPulse 报告推送成功")
+            results.append("BuilderPulse: 成功")
+        else:
+            print(f"❌ BuilderPulse 报告推送失败: {builderpulse_result}")
+            results.append(f"BuilderPulse: 失败 - {builderpulse_result}")
+        
+        return jsonify({
+            "status": "success",
+            "message": "所有报告已推送",
+            "details": results
+        })
+        
+    except Exception as e:
+        print(f"执行合并推送任务出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 # ============ 飞书Webhook处理 ============
 @app.route('/webhook/feishu', methods=['POST'])
 def feishu_webhook():
